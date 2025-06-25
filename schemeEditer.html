@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BiwaScheme エディタ (縦分割)</title>
+    <style>
+        body {
+            display: flex;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+            font-family: monospace;
+        }
+        #editor-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .ace_editor {
+            flex: 1;
+            height: 100%;
+            border: 1px solid #ddd;
+            box-sizing: border-box;
+        }
+        #input-editor {
+            border-right: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor-container">
+        <div id="input-editor"></div>
+        <div id="output-editor"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.33.0/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.33.0/mode-scheme.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.33.0/theme-monokai.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/biwascheme@0.8.0/release/biwascheme.min.js"></script>
+
+    <script>
+        // Ace Editor の初期化
+        const inputEditor = ace.edit("input-editor");
+        inputEditor.setTheme("ace/theme/monokai");
+        inputEditor.session.setMode("ace/mode/scheme");
+        inputEditor.setOptions({
+            fontSize: "16px",
+            enableBasicAutocompletion: true,
+            enableLiveAutocompletion: true
+        });
+
+        const outputEditor = ace.edit("output-editor");
+        outputEditor.setTheme("ace/theme/monokai");
+        outputEditor.session.setMode("ace/mode/scheme");
+        outputEditor.setReadOnly(true);
+        outputEditor.setOptions({
+            fontSize: "16px"
+        });
+
+        // BiwaScheme の出力バッファ
+        let biwaSchemeOutputBuffer = "";
+
+        // BiwaScheme インタープリタの初期化
+        const biwaScheme = new BiwaScheme.Interpreter({
+            default_stdout: function(s) {
+                biwaSchemeOutputBuffer += s;
+            }
+        });
+
+        // --- SICP Patch code ---
+        const sicpPatch = `(define nil '())
+(define true #t)
+(define false #f)
+(define (random n)
+  (random-integer n))
+(define (date2runtime date)
+  (+  
+     (* (date-hour date) 60 60 1000) 
+     (* (date-minute date) 60 1000) 
+     (* (date-second date) 1000) 
+     (date-millisecond date)
+  ))
+(define (runtime) (date2runtime (current-date)))`;
+
+        // SICPパッチをインタープリタに適用
+        // evaluateがPromiseを返さない可能性を考慮し、Promise.resolveでラップして常にPromiseとして扱う
+        Promise.resolve(biwaScheme.evaluate(sicpPatch))
+            .then(() => {
+                console.log("SICP patch applied successfully.");
+            })
+            .catch(e => {
+                console.error("Failed to apply SICP patch:", e);
+                // 必要であれば、エラーをoutputEditorにも表示するなど
+                // outputEditor.setValue("SICP Patch Error: " + e.message, -1);
+            });
+        // --- SICP Patch code end ---
+
+        // --- S式をパースするロジック ---
+        function parseTopLevelSExpressions(code) {
+            const expressions = [];
+            let balance = 0;
+            let inString = false;
+            let inComment = false;
+            let currentExprStart = 0;
+
+            for (let i = 0; i < code.length; i++) {
+                const char = code[i];
+                if (inComment) {
+                    if (char === '\n') {
+                        inComment = false;
+                    }
+                    continue;
+                }
+
+                if (char === '"') {
+                    inString = !inString;
+                } else if (!inString) {
+                    if (char === ';') {
+                        inComment = true;
+                    } else if (char === '(') {
+                        balance++;
+                    } else if (char === ')') {
+                        balance--;
+                    }
+                }
+
+                if (!inString && balance === 0 && (char === ')' || i === code.length - 1)) {
+                    const expr = code.substring(currentExprStart, i + 1).trim();
+                    if (expr.length > 0) {
+                        expressions.push(expr);
+                    }
+                    currentExprStart = i + 1;
+                }
+            }
+            return expressions;
+        }
+        // --- S式パースロジックここまで ---
+
+        // Ctrl + 右矢印 で評価を実行
+        inputEditor.commands.addCommand({
+            name: "evaluateScheme",
+            bindKey: { win: "Ctrl-Right", mac: "Command-Right" },
+            exec: async function(editor) {
+                const fullCode = editor.getValue();
+                outputEditor.setValue("Evaluating...", -1);
+
+                biwaSchemeOutputBuffer = "";
+
+                const sExpressions = parseTopLevelSExpressions(fullCode);
+                const allEvaluationResults = [];
+
+                for (const expr of sExpressions) {
+                    try {
+                        // evaluateがPromiseを返す場合はawaitで待機、そうでない場合は同期的に処理
+                        // Promise.resolveでラップすることで、常に非同期的に扱える
+                        const result = await Promise.resolve(biwaScheme.evaluate(expr));
+                        
+                        const capturedOutput = biwaSchemeOutputBuffer;
+                        biwaSchemeOutputBuffer = "";
+
+                        let resultString = "";
+                        if (result !== BiwaScheme.undef) {
+                            if (typeof biwaScheme.write_to_string === 'function') {
+                                resultString = biwaScheme.write_to_string(result);
+                            } else if (result && typeof result.to_write_string === 'function') {
+                                resultString = result.to_write_string();
+                            } else {
+                                resultString = String(result);
+                            }
+                        }
+
+                        let combinedOutput = capturedOutput;
+                        if (resultString && resultString !== "undefined") {
+                            if (combinedOutput.length > 0 && !combinedOutput.endsWith('\n')) {
+                                combinedOutput += '\n';
+                            }
+                            combinedOutput += resultString;
+                        }
+                        
+                        if (combinedOutput.length > 0) {
+                             allEvaluationResults.push(combinedOutput);
+                        }
+
+                    } catch (e) {
+                        console.error("Evaluation Error for S-expression:", expr, e);
+                        const errorMessage = `Error: ${e.message || e.toString()} (in '${expr.substring(0, Math.min(expr.length, 50))}...')\n`;
+                        
+                        allEvaluationResults.push(biwaSchemeOutputBuffer + errorMessage);
+                        biwaSchemeOutputBuffer = "";
+                        
+                        break; 
+                    }
+                }
+                
+                outputEditor.setValue(allEvaluationResults.join('\n\n'), -1);
+            }
+        });
+
+        // 初期コードの設定
+        inputEditor.setValue(`(define (factorial n)
+  (if (= n 0)
+      1
+      (* n (factorial (- n 1)))))
+
+(display "Factorial of 5:")
+(display (factorial 5))
+(newline)
+
+;; 複数行にわたるS式
+(define (add-one x)
+  (+ x 1))
+
+(add-one 10)
+(+ 1 2 3)
+"Hello BiwaScheme!"
+(list 'a 'b 'c)
+
+;; (runtime)
+;; (random 10)
+`, -1);
+    </script>
+</body>
+</html>
