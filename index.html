@@ -199,14 +199,14 @@
         });
 
         // 初期コードの設定
-        inputEditor.setValue(`(define (factorial n)
+        inputEditor.setValue(`
+(define (factorial n)
   (if (= n 0)
       1
       (* n (factorial (- n 1)))))
 
 (display "Factorial of 5:")
-(display (factorial 5))
-(newline)
+(factorial 5)
 
 ;; 複数行にわたるS式
 (define (add-one x)
@@ -214,12 +214,12 @@
 
 (add-one 10)
 (+ 1 2 3)
-"Hello BiwaScheme!"
 (list 'a 'b 'c)
 
 ;; (runtime)
 ;; (random 10)
 `, -1);
-    </script>
+
+</script>
 </body>
 </html>
