@@ -3,4 +3,4 @@
 https://norapg.github.io/sicp-reader/
 
 eval:
-ctrl + "→"
+ctrl + →
