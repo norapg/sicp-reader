@@ -2,5 +2,5 @@
 
 https://norapg.github.io/sicp-reader/
 
-eval
+eval:
 ctrl + "→"
