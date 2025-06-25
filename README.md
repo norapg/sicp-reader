@@ -1,6 +1,7 @@
 # sicp-reader(jp)
 
-https://norapg.github.io/sicp-reader/
+[sicp-reader](https://norapg.github.io/sicp-reader/)
+
 
 [ace.js](https://ace.c9.io/)
 
